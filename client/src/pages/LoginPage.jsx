@@ -4,7 +4,7 @@ import { Shield, Lock, Mail, Key, Eye, EyeOff, ArrowRight, CheckCircle2, Zap, Ar
 import axios from 'axios';
 
 export default function LoginPage({ isLocked = false }) {
-  const { login, quickUnlockPin, signup, logout, verifyPin, loading, user } = useAuth();
+  const { login, quickUnlockPin, signup, logout, verifyPin, resendVerification, loading, user } = useAuth();
   
   const savedEmail = localStorage.getItem('securevault_last_email') || user?.email || '';
 
@@ -19,7 +19,7 @@ export default function LoginPage({ isLocked = false }) {
   const [pin, setPin] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   
-  // OTP Reset states
+  // OTP Reset & Verification states
   const [otp, setOtp] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [otpSent, setOtpSent] = useState(false);
@@ -27,6 +27,25 @@ export default function LoginPage({ isLocked = false }) {
   
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [isUnverifiedEmail, setIsUnverifiedEmail] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
+
+  const handleResendEmail = async () => {
+    if (!email) {
+      setError('Please enter your email address to resend verification link.');
+      return;
+    }
+    setResendLoading(true);
+    setError('');
+    setMessage('');
+    const res = await resendVerification(email);
+    setResendLoading(false);
+    if (res.success) {
+      setMessage(res.message || 'Verification link sent! Check your inbox.');
+    } else {
+      setError(res.message || 'Failed to send verification email.');
+    }
+  };
 
   // Unlock handler when vault is locked (token exists, isUnlocked is false)
   const handleLockedUnlock = async (e) => {
@@ -47,12 +66,16 @@ export default function LoginPage({ isLocked = false }) {
     e.preventDefault();
     setError('');
     setMessage('');
+    setIsUnverifiedEmail(false);
 
     if (mainTab === 'login') {
       if (loginMode === 'password') {
         const res = await login(email, password);
         if (!res.success) {
           setError(res.message);
+          if (res.isVerified === false) {
+            setIsUnverifiedEmail(true);
+          }
         }
       } else {
         if (!pin || pin.length !== 4) {
@@ -62,6 +85,9 @@ export default function LoginPage({ isLocked = false }) {
         const res = await quickUnlockPin(email, pin);
         if (!res.success) {
           setError(res.message);
+          if (res.isVerified === false) {
+            setIsUnverifiedEmail(true);
+          }
         }
       }
     } else if (mainTab === 'register') {
@@ -72,6 +98,10 @@ export default function LoginPage({ isLocked = false }) {
       const res = await signup(email, password, pin || '0000');
       if (!res.success) {
         setError(res.message);
+      } else {
+        setMessage(res.message || 'Account created! Please check your email to verify before logging in.');
+        setIsUnverifiedEmail(true);
+        setMainTab('login');
       }
     }
   };
@@ -286,6 +316,24 @@ export default function LoginPage({ isLocked = false }) {
             <div className="mb-6 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
               {message}
+            </div>
+          )}
+          {isUnverifiedEmail && (
+            <div className="mb-6 p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-sm flex flex-col gap-3">
+              <div className="flex items-center gap-2 font-semibold">
+                <span>⚠️ Email Verification Required</span>
+              </div>
+              <p className="text-xs text-amber-200/80 leading-relaxed">
+                Your email ({email || 'address'}) must be verified before accessing the vault. Please check your inbox for the link.
+              </p>
+              <button
+                type="button"
+                onClick={handleResendEmail}
+                disabled={resendLoading}
+                className="self-start px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 rounded-xl text-xs font-semibold transition-all flex items-center gap-2"
+              >
+                {resendLoading ? 'Sending link...' : 'Resend Verification Email'}
+              </button>
             </div>
           )}
 

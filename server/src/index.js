@@ -2,32 +2,59 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
+const connectDB = require('./config/db');
+const { apiLimiter } = require('./middleware/rateLimiter');
 const authRoutes = require('./routes/authRoutes');
 const fileRoutes = require('./routes/fileRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Security Middlewares
-app.use(helmet({
-  crossOriginResourcePolicy: { policy: "cross-origin" }
+// Connect MongoDB Database (Live & Local support)
+connectDB();
+
+// Gzip & Deflate Compression Middleware for Backend Speed Optimization
+app.use(compression({
+  threshold: 1024, // Compress responses > 1KB
+  filter: (req, res) => {
+    if (req.headers['x-no-compression']) return false;
+    return compression.filter(req, res);
+  }
 }));
+
+// Helmet Security Headers
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: false // Disable CSP restrictions for API server
+}));
+
+// CORS Configuration (Production & Development support)
+const allowedOrigins = process.env.CLIENT_URL 
+  ? process.env.CLIENT_URL.split(',').map(url => url.trim()) 
+  : '*';
 
 app.use(cors({
-  origin: '*', // Allow client connections
+  origin: allowedOrigins,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  credentials: true
 }));
 
-// Body Parsing Middlewares
+// Global API Rate Limiting
+app.use('/api', apiLimiter);
+
+// Body Parsing Middlewares with 50MB payload limits
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Health Check Route
+// Server Telemetry & Health Check Route
 app.get('/api/health', (req, res) => {
   res.json({
     status: 'ok',
-    service: 'SecureVault Zero-Knowledge Server',
+    service: 'SecureVault Zero-Knowledge Production Server',
+    environment: process.env.NODE_ENV || 'development',
+    uptime: `${Math.floor(process.uptime())}s`,
     timestamp: new Date().toISOString()
   });
 });
@@ -36,14 +63,14 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/files', fileRoutes);
 
-// 404 Handler
+// 404 Route Not Found Handler
 app.use((req, res) => {
-  res.status(404).json({ success: false, message: 'Route not found.' });
+  res.status(404).json({ success: false, message: 'API Route not found.' });
 });
 
-// Error Handling Middleware
+// Global Centralized Error Handling Middleware
 app.use((err, req, res, next) => {
-  console.error('Unhandled Express Error:', err);
+  console.error('💥 Unhandled Express Server Error:', err);
   res.status(err.status || 500).json({
     success: false,
     message: err.message || 'Internal Server Error'
@@ -53,10 +80,12 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`
   ======================================================
-  🔐 SecureVault Zero-Knowledge Backend Running!
+  🔐 SecureVault Zero-Knowledge Production Backend Ready!
   ------------------------------------------------------
   ► Server URL: http://localhost:${PORT}
   ► Environment: ${process.env.NODE_ENV || 'development'}
+  ► Compression: Enabled (gzip/deflate)
+  ► Rate Limiting: Active
   ======================================================
   `);
 });

@@ -1,11 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import axios from 'axios';
 import { useAuth } from './AuthContext';
 
 const VaultContext = createContext();
 
 export function VaultProvider({ children }) {
-  const { token, isUnlocked } = useAuth();
+  const { token } = useAuth();
   const [files, setFiles] = useState([]);
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
@@ -14,7 +14,7 @@ export function VaultProvider({ children }) {
   const [previewFile, setPreviewFile] = useState(null);
   const [isUploadOpen, setIsUploadOpen] = useState(false);
 
-  // Fetch files from server
+  // Fetch files from server (memoized with useCallback)
   const fetchFiles = useCallback(async () => {
     if (!token) return;
     setLoadingFiles(true);
@@ -22,11 +22,11 @@ export function VaultProvider({ children }) {
       const res = await axios.get('/api/files', {
         params: {
           category: activeCategory,
-          q: searchQuery
+          search: searchQuery
         }
       });
       if (res.data.success) {
-        setFiles(res.data.files);
+        setFiles(res.data.files || []);
         if (res.data.storage) {
           setStorage(res.data.storage);
         }
@@ -42,8 +42,8 @@ export function VaultProvider({ children }) {
     fetchFiles();
   }, [fetchFiles]);
 
-  // Upload files with real-time upload progress tracking
-  const uploadFiles = async (fileList, onProgress) => {
+  // Upload files with real-time upload progress tracking (memoized with useCallback)
+  const uploadFiles = useCallback(async (fileList, onProgress) => {
     if (!fileList || fileList.length === 0) return;
 
     const formData = new FormData();
@@ -57,14 +57,14 @@ export function VaultProvider({ children }) {
           'Content-Type': 'multipart/form-data'
         },
         onUploadProgress: (progressEvent) => {
-          const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+          const percentCompleted = Math.round((progressEvent.loaded * 100) / (progressEvent.total || 1));
           if (onProgress) onProgress(percentCompleted);
         }
       });
 
       if (res.data.success) {
         await fetchFiles();
-        return { success: true, count: res.data.files.length };
+        return { success: true, count: res.data.files?.length || 0 };
       }
     } catch (err) {
       console.error('Upload failed:', err);
@@ -73,10 +73,10 @@ export function VaultProvider({ children }) {
         message: err.response?.data?.message || 'File upload failed.'
       };
     }
-  };
+  }, [fetchFiles]);
 
-  // Delete file
-  const deleteFile = async (fileId) => {
+  // Delete file (memoized with useCallback)
+  const deleteFile = useCallback(async (fileId) => {
     try {
       const res = await axios.delete(`/api/files/${fileId}`);
       if (res.data.success) {
@@ -96,27 +96,39 @@ export function VaultProvider({ children }) {
     } catch (err) {
       return { success: false, message: err.response?.data?.message || 'Delete failed.' };
     }
-  };
+  }, [previewFile]);
+
+  // Context value memoization to eliminate unnecessary re-renders
+  const value = useMemo(() => ({
+    files,
+    activeCategory,
+    setActiveCategory,
+    searchQuery,
+    setSearchQuery,
+    storage,
+    loadingFiles,
+    previewFile,
+    setPreviewFile,
+    isUploadOpen,
+    setIsUploadOpen,
+    fetchFiles,
+    uploadFiles,
+    deleteFile
+  }), [
+    files,
+    activeCategory,
+    searchQuery,
+    storage,
+    loadingFiles,
+    previewFile,
+    isUploadOpen,
+    fetchFiles,
+    uploadFiles,
+    deleteFile
+  ]);
 
   return (
-    <VaultContext.Provider
-      value={{
-        files,
-        activeCategory,
-        setActiveCategory,
-        searchQuery,
-        setSearchQuery,
-        storage,
-        loadingFiles,
-        previewFile,
-        setPreviewFile,
-        isUploadOpen,
-        setIsUploadOpen,
-        fetchFiles,
-        uploadFiles,
-        deleteFile
-      }}
-    >
+    <VaultContext.Provider value={value}>
       {children}
     </VaultContext.Provider>
   );
